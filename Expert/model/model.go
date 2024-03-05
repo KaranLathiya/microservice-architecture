@@ -15,8 +15,6 @@ type ExpertWithPortfolio struct {
 }
 
 type Claims struct {
-	ExpertID                  []string `json:"expertID"`
-	IncludeNumberOfPortfolios int      `json:"includeNumberOfPortfolios"`
 	jwt.StandardClaims
 }
 
@@ -30,4 +28,9 @@ type Portfolio struct {
 type PortfoliosOfExpert struct {
 	TotalPortfolios int16       `json:"totalPortfolios"  validate:"required"`
 	Portfolios      []Portfolio `json:"portfolios,omitempty" `
+}
+
+type InputForPortfolios struct {
+	ExpertIDs                 []string `json:"expertID"`
+	IncludeNumberOfPortfolios int      `json:"includeNumberOfPortfolios"`
 }

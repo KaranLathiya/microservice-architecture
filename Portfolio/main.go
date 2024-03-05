@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"portfolio/dal"
 	"portfolio/model"
@@ -29,17 +30,26 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	token := r.Header.Get("Authorization")
 	fmt.Println(token)
-	var claims model.Claims
-	claims, errMessage := verifyToken(token)
+	errMessage := verifyToken(token)
 	if !(errMessage.Code == 0 || errMessage.Message == "") {
 		w.WriteHeader(errMessage.Code)
 		errMessage, _ := json.MarshalIndent(errMessage, "", "  ")
 		w.Write(errMessage)
 		return
 	}
-
+	var inputForPortfolios model.InputForPortfolios
+	bodyData, err := io.ReadAll(r.Body)
+	if err != nil {
+		response.MessageShow(500, "Internal server error", w)
+		return
+	}
+	err = json.Unmarshal(bodyData, &inputForPortfolios)
+	if err != nil {
+		response.MessageShow(500, "Internal server error", w)
+		return
+	}
 	expertPortfolioMap := make(map[string]model.PortfoliosOfExpert)
-	for _, expertID := range claims.ExpertID {
+	for _, expertID := range inputForPortfolios.ExpertIDs {
 		var portfoliosOfExpert model.PortfoliosOfExpert
 		expertPortfolioMap[expertID] = portfoliosOfExpert
 	}
@@ -47,7 +57,7 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(`WITH RankedPortfolios AS (
 		SELECT id, name, created_by, image, created_at, ROW_NUMBER() OVER( partition  by created_by order by created_at desc) row_num
 		FROM public.portfolio where created_by in ('%v') order by created_at desc )
-		select id, name, created_by, image, created_at from RankedPortfolios where row_num <= %d;`, strings.Join(claims.ExpertID, "' , '"), claims.IncludeNumberOfPortfolios)
+		select id, name, created_by, image, created_at from RankedPortfolios where row_num <= %d;`, strings.Join(inputForPortfolios.ExpertIDs, "' , '"), inputForPortfolios.IncludeNumberOfPortfolios)
 	query = sqlx.Rebind(sqlx.DOLLAR, query)
 	rows, err := db.Query(query)
 	if err != nil {
@@ -75,7 +85,7 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 		// 	expertPortfolioMap[expertID] = portfoliosOfExpert
 		// }
 	}
-	query = fmt.Sprintf(`SELECT created_by, count(id) as total_portfolios FROM public.portfolio where created_by in ('%v')  group by created_by ;`, strings.Join(claims.ExpertID, "' , '"))
+	query = fmt.Sprintf(`SELECT created_by, count(id) as total_portfolios FROM public.portfolio where created_by in ('%v')  group by created_by ;`, strings.Join(inputForPortfolios.ExpertIDs, "' , '"))
 	query = sqlx.Rebind(sqlx.DOLLAR, query)
 	rows, err = db.Query(query)
 	if err != nil {
@@ -107,7 +117,7 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 	w.Write(result)
 }
 
-func verifyToken(token string) (model.Claims, model.Message) {
+func verifyToken(token string) model.Message {
 	claims := &model.Claims{}
 	var message model.Message
 	tkn, err := jwt.ParseWithClaims(token, claims,
@@ -119,19 +129,24 @@ func verifyToken(token string) (model.Claims, model.Message) {
 		if err == jwt.ErrSignatureInvalid {
 			message.Code = http.StatusUnauthorized
 			message.Message = err.Error()
-			return *claims, message
+			return message
 		}
 		message.Code = http.StatusBadRequest
 		message.Message = err.Error()
-		return *claims, message
+		return message
 	}
 
 	if !tkn.Valid {
 		message.Code = http.StatusUnauthorized
 		message.Message = "token is invalid"
-		return *claims, message
+		return message
 	}
-	return *claims, message
+	if claims.Audience != "Portfolio" && claims.Subject == "Portfolios of expert" {
+		message.Code = http.StatusUnauthorized
+		message.Message = "invalid token details"
+		return message
+	}
+	return message
 }
 
 // func run() {

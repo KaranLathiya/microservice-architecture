@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"expert/dal"
 	"expert/model"
@@ -15,7 +16,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 )
 
-var jwtKey = []byte("secret_ke")
+var jwtKey = []byte("secret_key")
 
 func main() {
 	db, _ := dal.Connect()
@@ -63,7 +64,7 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			includeNumberOfPortfoliosInteger = 3
 		}
-		token, err := createJWT(expertIDs, includeNumberOfPortfoliosInteger)
+		token, err := createJWT()
 		if err != nil {
 			fmt.Println(err)
 			response.MessageShow(500, "Internal server error", w)
@@ -71,7 +72,11 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Println("call second service")
 		url := "http://localhost:8082/user/portfolio"
-		req, err := http.NewRequest("GET", url, nil)
+		var inputForPortfolios model.InputForPortfolios
+		inputForPortfolios.ExpertIDs = expertIDs
+		inputForPortfolios.IncludeNumberOfPortfolios = includeNumberOfPortfoliosInteger
+		inputForPortfoliosByte, _ := json.MarshalIndent(inputForPortfolios, "", " ")
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(inputForPortfoliosByte))
 		if err != nil {
 			fmt.Print(err.Error())
 		}
@@ -104,19 +109,17 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 	w.Write(result)
 }
 
-func createJWT(expertIDs []string, includeNumberOfPortfolios int) (string, error) {
+func createJWT() (string, error) {
 	expirationTime := time.Now().Add(time.Minute * 5)
 
 	claims := model.Claims{
-		ExpertID:                  expertIDs,
-		IncludeNumberOfPortfolios: includeNumberOfPortfolios,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
 			Audience:  "Portfolio",
 			Subject:   "Portfolios of expert",
 		},
 	}
-
+	// jwt.EncodeSegment(jwtKey)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
 	fmt.Println(tokenString)

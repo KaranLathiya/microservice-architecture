@@ -32,7 +32,6 @@ func Connect() (*sql.DB, error) {
 			log.Fatal("Error pinging the database:", err)
 		}
 		fmt.Println("Successfully connected to CockroachDB!")
-
 	})
 	return db, err
 }
