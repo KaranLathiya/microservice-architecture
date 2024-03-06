@@ -4,39 +4,70 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"portfolio/dal"
 	"portfolio/model"
 	"portfolio/response"
 	"strings"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/joho/godotenv"
 )
 
-var jwtKey = []byte("secret_key")
+var jwtKey []byte
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatalf("Some error occured. Err: %s", err)
+	}
+	jwtKey = []byte(os.Getenv("JWTKEY"))
 	db, _ := dal.Connect()
 	defer db.Close()
 	fmt.Println("Server started")
 	// run()
-	http.HandleFunc("/user/portfolio", portfolioList)
+	r := chi.NewRouter()
+	r.Route("/user", func(r chi.Router) {
+		r.Use(middleware)
+		r.Post("/portfolio", portfolioList)
+	})
+
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(405)
+		w.Write([]byte("wrong method"))
+	})
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		w.Write([]byte("route does not exist"))
+	})
+	http.Handle("/", r)
 	http.ListenAndServe(":8082", nil)
+}
+
+func middleware(next http.Handler) http.Handler {
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("Authorization")
+		fmt.Println(token)
+		errMessage := verifyToken(token)
+		if !(errMessage.Code == 0 || errMessage.Message == "") {
+			w.WriteHeader(errMessage.Code)
+			errMessage, _ := json.MarshalIndent(errMessage, "", "  ")
+			w.Write(errMessage)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func portfolioList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
-	token := r.Header.Get("Authorization")
-	fmt.Println(token)
-	errMessage := verifyToken(token)
-	if !(errMessage.Code == 0 || errMessage.Message == "") {
-		w.WriteHeader(errMessage.Code)
-		errMessage, _ := json.MarshalIndent(errMessage, "", "  ")
-		w.Write(errMessage)
-		return
-	}
+
 	var inputForPortfolios model.InputForPortfolios
 	bodyData, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -148,33 +179,3 @@ func verifyToken(token string) model.Message {
 	}
 	return message
 }
-
-// func run() {
-// 	fmt.Println("Sda")
-// 	db := dal.GetDB()
-// 	i := 86
-// 	for i < 88 {
-// 		val := "948489062412845057"
-// 		name := "portfolio" + strconv.Itoa(i)
-// 		image := "https://jwt.io/img/pic_logo.svg"
-// 		var id string
-// 		err := db.QueryRow("INSERT INTO public.portfolios ( name, created_by, image, created_at) VALUES( $1, $2, $3, $4) returning id;", name, val, image, currentTimeConvertToCurrentFormattedTime()).Scan(&id)
-// 		if err != nil {
-// 			fmt.Println(err)
-// 			break
-// 		}
-// 		time.Sleep(1 * time.Second)
-// 		i += 1
-// 	}
-// fmt.Println("done")
-// }
-
-// func currentTimeConvertToCurrentFormattedTime() string {
-// 	// fmt.Println(time.Now().UTC())
-// 	// fmt.Println(time.Now().Local().UTC())
-// 	currentTime := time.Now().UTC()
-// 	outputFormat := "2006-01-02 15:04:05-07:00"
-// 	currentFormattedTime := currentTime.Format(outputFormat)
-// 	// fmt.Println(currentFormattedTime)
-// 	return currentFormattedTime
-// }

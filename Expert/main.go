@@ -8,21 +8,43 @@ import (
 	"expert/response"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/go-chi/chi"
+	"github.com/joho/godotenv"
 )
 
-var jwtKey = []byte("secret_key")
+var jwtKey []byte
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatalf("Some error occured. Err: %s", err)
+	}
+	jwtKey = []byte(os.Getenv("JWTKEY"))
 	db, _ := dal.Connect()
 	defer db.Close()
 	fmt.Println("Server started")
-	http.HandleFunc("/expert", expertList)
+	r := chi.NewRouter()
+	r.Route("/", func(r chi.Router) {
+		r.Get("/user/expert", expertList)
+	})
+
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(405)
+		w.Write([]byte("wrong method"))
+	})
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		w.Write([]byte("route does not exist"))
+	})
+	http.Handle("/", r)
 	http.ListenAndServe(":8081", nil)
 }
 
@@ -47,7 +69,6 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 	}
 	var expertsWithPortfolios []model.ExpertWithPortfolio
 	expertIDs := []string{}
-	fmt.Println(expertIDs)
 	for rows.Next() {
 		var expertWithPortfolio model.ExpertWithPortfolio
 		err = rows.Scan(&expertWithPortfolio.ID, &expertWithPortfolio.Name)
@@ -58,7 +79,6 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 		expertIDs = append(expertIDs, expertWithPortfolio.ID)
 		expertsWithPortfolios = append(expertsWithPortfolios, expertWithPortfolio)
 	}
-	fmt.Println(expertsWithPortfolios)
 	if !(includePortfolios == "false") {
 		includeNumberOfPortfoliosInteger, err := strconv.Atoi(includeNumberOfPortfolios)
 		if err != nil {
@@ -79,17 +99,23 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(inputForPortfoliosByte))
 		if err != nil {
 			fmt.Print(err.Error())
+			response.MessageShow(500, "Internal server error", w)
+			return
 		}
 		req.Header.Add("Authorization", token)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			fmt.Print(err.Error())
+			response.MessageShow(500, "Internal server error", w)
+			return
 		}
 
 		defer res.Body.Close()
 		body, readErr := io.ReadAll(res.Body)
 		if readErr != nil {
 			fmt.Print(err.Error())
+			response.MessageShow(500, "Internal server error", w)
+			return
 		}
 		var mapOfExpertsWithPortfolios map[string]model.PortfoliosOfExpert
 		err = json.Unmarshal(body, &mapOfExpertsWithPortfolios)
@@ -98,7 +124,6 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 			response.MessageShow(500, "Internal server error", w)
 			return
 		}
-		fmt.Println(mapOfExpertsWithPortfolios)
 		for i, expertID := range expertIDs {
 			expertsWithPortfolios[i].TotalPortfolios = mapOfExpertsWithPortfolios[expertID].TotalPortfolios
 			expertsWithPortfolios[i].Portfolios = mapOfExpertsWithPortfolios[expertID].Portfolios
@@ -128,25 +153,3 @@ func createJWT() (string, error) {
 	}
 	return tokenString, nil
 }
-
-// 	i := 1
-// 	for i < 10000 {
-// 		name := "user" + strconv.Itoa(i)
-// 		_ = db.QueryRow("INSERT INTO public.expert (name) VALUES ($1);", name)
-// 		// if err != nil {
-// 		// 	fmt.Println(err)
-// 		// 	break
-// 		// }
-// 		i+=1
-// 	}
-// }
-
-// var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-// func RandStringRunes(n int) string {
-// 	b := make([]rune, n)
-// 	for i := range b {
-// 		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-// 	}
-// 	return string(b)
-// }
