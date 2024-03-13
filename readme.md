@@ -37,7 +37,7 @@ Set the page parameter to get the list of expert in number of 10.(page default s
 
 Set the includePortfolios parameter to get the list of portfolios of expert and for get the exact number of portfolios set the includeNumberOfPortfolios.(includePortfolios default set to true and includeNumberOfPortfolios set to default 3)
 
-If includePortfolios value is set to false then only expert details fetched otherwise expert details with portfolis details fetched.
+If includePortfolios value is set to false then only expert details fetched otherwise if set value set to true expert details with portfolis details fetched.
 
 For fetching portfolis details internally JWT token created with default expiration time of 5 minutes on expert service and then set it to the authorization field on header of request and in body set the array of expertIds and includeNumberOfPortfolios for internal call on portfolio service of api --POST method 
 

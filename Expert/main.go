@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -32,8 +31,8 @@ func main() {
 	defer db.Close()
 	fmt.Println("Server started")
 	r := chi.NewRouter()
-	r.Route("/", func(r chi.Router) {
-		r.Get("/user/expert", expertList)
+	r.Route("/user", func(r chi.Router) {
+		r.Get("/expert", expertList)
 	})
 
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
@@ -51,14 +50,12 @@ func main() {
 func expertList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	page := r.FormValue("page")
-	page = strings.TrimSpace(page)
 	includePortfolios := r.FormValue("includePortfolios")
-	includePortfolios = strings.TrimSpace(includePortfolios)
 	includeNumberOfPortfolios := r.FormValue("includeNumberOfPortfolios")
-	includeNumberOfPortfolios = strings.TrimSpace(includeNumberOfPortfolios)
 	pageInteger, err := strconv.Atoi(page)
 	if err != nil {
-		pageInteger = 0
+		response.MessageShow(400, http.StatusText(400), w)
+		return
 	}
 	db := dal.GetDB()
 	rows, err := db.Query("SELECT id,name FROM public.expert order by name LIMIT 10 OFFSET $1", pageInteger*10)
@@ -79,55 +76,15 @@ func expertList(w http.ResponseWriter, r *http.Request) {
 		expertIDs = append(expertIDs, expertWithPortfolio.ID)
 		expertsWithPortfolios = append(expertsWithPortfolios, expertWithPortfolio)
 	}
-	if !(includePortfolios == "false") {
-		includeNumberOfPortfoliosInteger, err := strconv.Atoi(includeNumberOfPortfolios)
-		if err != nil {
-			includeNumberOfPortfoliosInteger = 3
-		}
-		token, err := createJWT()
-		if err != nil {
-			fmt.Println(err)
-			response.MessageShow(500, "Internal server error", w)
+	includePortfoliosBool, err := strconv.ParseBool(includePortfolios)
+	if err != nil {
+		response.MessageShow(400, http.StatusText(400), w)
+		return
+	}
+	if includePortfoliosBool {
+		err := includePortfoliosOfExpert(includeNumberOfPortfolios , expertIDs , w , expertsWithPortfolios)
+		if err != nil{
 			return
-		}
-		fmt.Println("call second service")
-		url := "http://localhost:8082/user/portfolio"
-		var inputForPortfolios model.InputForPortfolios
-		inputForPortfolios.ExpertIDs = expertIDs
-		inputForPortfolios.IncludeNumberOfPortfolios = includeNumberOfPortfoliosInteger
-		inputForPortfoliosByte, _ := json.MarshalIndent(inputForPortfolios, "", " ")
-		req, err := http.NewRequest("POST", url, bytes.NewBuffer(inputForPortfoliosByte))
-		if err != nil {
-			fmt.Print(err.Error())
-			response.MessageShow(500, "Internal server error", w)
-			return
-		}
-		req.Header.Add("Authorization", token)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fmt.Print(err.Error())
-			response.MessageShow(500, "Internal server error", w)
-			return
-		}
-
-		defer res.Body.Close()
-		body, readErr := io.ReadAll(res.Body)
-		if readErr != nil {
-			fmt.Print(err.Error())
-			response.MessageShow(500, "Internal server error", w)
-			return
-		}
-		var mapOfExpertsWithPortfolios map[string]model.PortfoliosOfExpert
-		err = json.Unmarshal(body, &mapOfExpertsWithPortfolios)
-		if err != nil {
-			fmt.Println(err)
-			response.MessageShow(500, "Internal server error", w)
-			return
-		}
-		for i, expertID := range expertIDs {
-			expertsWithPortfolios[i].TotalPortfolios = mapOfExpertsWithPortfolios[expertID].TotalPortfolios
-			expertsWithPortfolios[i].Portfolios = mapOfExpertsWithPortfolios[expertID].Portfolios
-			fmt.Println(expertsWithPortfolios[i])
 		}
 	}
 	result, _ := json.MarshalIndent(expertsWithPortfolios, "", "  ")
@@ -152,4 +109,64 @@ func createJWT() (string, error) {
 		return "", err
 	}
 	return tokenString, nil
+}
+
+func includePortfoliosOfExpert(includeNumberOfPortfolios string, expertIDs []string, w http.ResponseWriter, expertsWithPortfolios []model.ExpertWithPortfolio) error {
+
+	includeNumberOfPortfoliosInteger, err := strconv.Atoi(includeNumberOfPortfolios)
+	if err != nil {
+		response.MessageShow(400, http.StatusText(400), w)
+		return err
+	}
+	if includeNumberOfPortfoliosInteger == 0 {
+		if !(includeNumberOfPortfolios == "0"){
+		includeNumberOfPortfoliosInteger = 3 
+		}
+	}
+	token, err := createJWT()
+	if err != nil {
+		fmt.Println(err)
+		response.MessageShow(500, http.StatusText(500), w)
+		return err
+	}
+	fmt.Println("call second service")
+	url := "http://localhost:8082/expert/portfolio"
+	var inputForPortfolios model.InputForPortfolios
+	inputForPortfolios.ExpertIDs = expertIDs
+	inputForPortfolios.IncludeNumberOfPortfolios = includeNumberOfPortfoliosInteger
+	inputForPortfoliosByte, _ := json.MarshalIndent(inputForPortfolios, "", " ")
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(inputForPortfoliosByte))
+	if err != nil {
+		fmt.Print(err.Error())
+		response.MessageShow(500, http.StatusText(500), w)
+		return err
+	}
+	req.Header.Add("Authorization", token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Print(err.Error())
+		response.MessageShow(500, http.StatusText(500), w)
+		return err
+	}
+
+	defer res.Body.Close()
+	body, readErr := io.ReadAll(res.Body)
+	if readErr != nil {
+		fmt.Print(err.Error())
+		response.MessageShow(500, http.StatusText(500), w)
+		return err
+	}
+	var mapOfExpertsWithPortfolios map[string]model.PortfoliosOfExpert
+	err = json.Unmarshal(body, &mapOfExpertsWithPortfolios)
+	if err != nil {
+		fmt.Println(err)
+		response.MessageShow(500, http.StatusText(500), w)
+		return err
+	}
+	for i, expertID := range expertIDs {
+		expertsWithPortfolios[i].TotalPortfolios = mapOfExpertsWithPortfolios[expertID].TotalPortfolios
+		expertsWithPortfolios[i].Portfolios = mapOfExpertsWithPortfolios[expertID].Portfolios
+		fmt.Println(expertsWithPortfolios[i])
+	}
+	return nil
 }

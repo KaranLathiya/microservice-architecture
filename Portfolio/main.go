@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"portfolio/model"
 	"portfolio/response"
 	"strings"
+	"sync"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/go-chi/chi/v5"
@@ -19,6 +21,7 @@ import (
 )
 
 var jwtKey []byte
+var wg sync.WaitGroup
 
 func main() {
 	err := godotenv.Load(".env")
@@ -29,9 +32,8 @@ func main() {
 	db, _ := dal.Connect()
 	defer db.Close()
 	fmt.Println("Server started")
-	// run()
 	r := chi.NewRouter()
-	r.Route("/user", func(r chi.Router) {
+	r.Route("/expert", func(r chi.Router) {
 		r.Use(middleware)
 		r.Post("/portfolio", portfolioList)
 	})
@@ -68,6 +70,7 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
+	var quit = make(chan error)
 	var inputForPortfolios model.InputForPortfolios
 	bodyData, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -80,11 +83,30 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expertPortfolioMap := make(map[string]model.PortfoliosOfExpert)
-	for _, expertID := range inputForPortfolios.ExpertIDs {
-		var portfoliosOfExpert model.PortfoliosOfExpert
-		expertPortfolioMap[expertID] = portfoliosOfExpert
-	}
+	// for _, expertID := range inputForPortfolios.ExpertIDs {
+	// 	var portfoliosOfExpert model.PortfoliosOfExpert
+	// 	expertPortfolioMap[expertID] = portfoliosOfExpert
+	// }
 	db := dal.GetDB()
+	wg.Add(2)
+	go portfoliosOfExpert(db, inputForPortfolios, expertPortfolioMap, w, quit)
+	go totalNumberOfPortfoliosOfExpert(db, inputForPortfolios, expertPortfolioMap, w, quit)
+	go func() {
+		wg.Wait()
+		close(quit)
+	}()
+
+	for err := range quit {
+		fmt.Println(err)
+		return
+	}
+
+	result, _ := json.MarshalIndent(expertPortfolioMap, "", "  ")
+	w.Write(result)
+}
+
+func portfoliosOfExpert(db *sql.DB, inputForPortfolios model.InputForPortfolios, expertPortfolioMap map[string]model.PortfoliosOfExpert, w http.ResponseWriter, quit chan<- error) {
+	defer wg.Done()
 	query := fmt.Sprintf(`WITH RankedPortfolios AS (
 		SELECT id, name, created_by, image, created_at, ROW_NUMBER() OVER( partition  by created_by order by created_at desc) row_num
 		FROM public.portfolio where created_by in ('%v') order by created_at desc )
@@ -94,6 +116,7 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		databaseErrorMessage, databaseErrorCode := response.DatabaseErrorShow(err)
 		response.MessageShow(databaseErrorCode, databaseErrorMessage, w)
+		quit <- err
 		return
 	}
 	for rows.Next() {
@@ -103,25 +126,30 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			databaseErrorMessage, databaseErrorCode := response.DatabaseErrorShow(err)
 			response.MessageShow(databaseErrorCode, databaseErrorMessage, w)
+			quit <- err
 			return
 		}
 
 		if expertPortfoliosMapValue, ok := expertPortfolioMap[expertID]; ok {
 			expertPortfoliosMapValue.Portfolios = append(expertPortfoliosMapValue.Portfolios, portfolio)
 			expertPortfolioMap[expertID] = expertPortfoliosMapValue
+		} else {
+			var portfoliosOfExpert model.PortfoliosOfExpert
+			portfoliosOfExpert.Portfolios = append(portfoliosOfExpert.Portfolios, portfolio)
+			expertPortfolioMap[expertID] = portfoliosOfExpert
 		}
-		// else {
-		// 	var portfoliosOfExpert model.PortfoliosOfExpert
-		// 	portfoliosOfExpert.Portfolios = append(portfoliosOfExpert.Portfolios, portfolio)
-		// 	expertPortfolioMap[expertID] = portfoliosOfExpert
-		// }
 	}
-	query = fmt.Sprintf(`SELECT created_by, count(id) as total_portfolios FROM public.portfolio where created_by in ('%v')  group by created_by ;`, strings.Join(inputForPortfolios.ExpertIDs, "' , '"))
+}
+
+func totalNumberOfPortfoliosOfExpert(db *sql.DB, inputForPortfolios model.InputForPortfolios, expertPortfolioMap map[string]model.PortfoliosOfExpert, w http.ResponseWriter, quit chan<- error) {
+	defer wg.Done()
+	query := fmt.Sprintf(`SELECT created_by, count(id) as total_portfolios FROM public.portfolio where created_by in ('%v')  group by created_by ;`, strings.Join(inputForPortfolios.ExpertIDs, "' , '"))
 	query = sqlx.Rebind(sqlx.DOLLAR, query)
-	rows, err = db.Query(query)
+	rows, err := db.Query(query)
 	if err != nil {
 		databaseErrorMessage, databaseErrorCode := response.DatabaseErrorShow(err)
 		response.MessageShow(databaseErrorCode, databaseErrorMessage, w)
+		quit <- err
 		return
 	}
 	for rows.Next() {
@@ -131,21 +159,19 @@ func portfolioList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			databaseErrorMessage, databaseErrorCode := response.DatabaseErrorShow(err)
 			response.MessageShow(databaseErrorCode, databaseErrorMessage, w)
+			quit <- err
 			return
 		}
 
 		if expertPortfoliosMapValue, ok := expertPortfolioMap[expertID]; ok {
 			expertPortfoliosMapValue.TotalPortfolios = int16(totalPortfolios)
 			expertPortfolioMap[expertID] = expertPortfoliosMapValue
+		} else {
+			var portfoliosOfExpert model.PortfoliosOfExpert
+			portfoliosOfExpert.TotalPortfolios = int16(totalPortfolios)
+			expertPortfolioMap[expertID] = portfoliosOfExpert
 		}
-		//  else {
-		// 	var portfoliosOfExpert model.PortfoliosOfExpert
-		// 	portfoliosOfExpert.TotalPortfolios = int16(totalPortfolios)
-		// 	expertPortfolioMap[expertID] = portfoliosOfExpert
-		// }
 	}
-	result, _ := json.MarshalIndent(expertPortfolioMap, "", "  ")
-	w.Write(result)
 }
 
 func verifyToken(token string) model.Message {
