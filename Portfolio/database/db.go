@@ -1,4 +1,4 @@
-package dal
+package database
 
 import (
 	"database/sql"
@@ -13,15 +13,11 @@ var once sync.Once
 var db *sql.DB
 
 func Connect() (*sql.DB, error) {
-
-	// dbname := "work"
 	var err error
 	once.Do(func() {
 		// Connection parameters
-		connStr := "postgresql://root@localhost:26257/expert?sslmode=disable"
+		connStr := "postgresql://root@localhost:26257/portfolio?sslmode=disable"
 
-		// connection_string := "user=2810k dbname=work sslmode=disable"
-		// fmt.Println(connection_string)
 		db, err = sql.Open("postgres", connStr)
 		if err != nil {
 			fmt.Println("Database Connection err", err)
@@ -32,13 +28,9 @@ func Connect() (*sql.DB, error) {
 			log.Fatal("Error pinging the database:", err)
 		}
 		fmt.Println("Successfully connected to CockroachDB!")
+
 	})
 	return db, err
-}
-
-func LogAndQuery(db *sql.DB, query string, args ...interface{}) (*sql.Rows, error) {
-	fmt.Println(query)
-	return db.Query(query, args...)
 }
 
 func GetDB() *sql.DB {

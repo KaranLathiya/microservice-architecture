@@ -2,7 +2,6 @@ package response
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"portfolio/model"
 
@@ -13,22 +12,18 @@ func MessageShow(code int, errMessage string, w http.ResponseWriter) {
 	var message model.Message
 	message.Code = code
 	message.Message = errMessage
-	messageData, _ := json.MarshalIndent(message, "", "  ")
+	messageData, err := json.MarshalIndent(message, "", "  ")
+	if err != nil {
+		message.Code = 400
+		message.Message = "Error on marshaling"
+	}
 	w.WriteHeader(code)
 	w.Write(messageData)
 }
 
 func DatabaseErrorShow(err error) (string, int) {
-	if dbErr, ok := err.(*pq.Error); ok { // For PostgreSQL database driver (pq)
-		// Access PostgreSQL-specific error fields
-		// errCode,_ :=  strconv.Atoi(dbErr.Code)
+	if dbErr, ok := err.(*pq.Error); ok {
 		errCode := dbErr.Code
-		// errMessage := errCode.Name()
-		// errDetail := dbErr.Detail
-		// Handle the PostgreSQL-specific error
-		// fmt.Println(errCode)
-		// fmt.Println(errDetail)
-		// fmt.Println(errMessage)
 		switch errCode {
 		case "23502":
 			// not-null constraint violation
@@ -45,9 +40,7 @@ func DatabaseErrorShow(err error) (string, int) {
 		case "23514":
 			// check constraint violation
 			return "This record contains inconsistent or out-of-range data", 400
-
 		}
 	}
-	fmt.Println(err.Error())
 	return "Internal server error", 500
 }

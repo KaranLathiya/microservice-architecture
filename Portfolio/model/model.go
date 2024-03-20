@@ -24,6 +24,6 @@ type PortfoliosOfExpert struct {
 }
 
 type InputForPortfolios struct {
-	ExpertIDs                 []string `json:"expertID"`
+	ExpertIDs                 []string `json:"expertIDs"`
 	IncludeNumberOfPortfolios int      `json:"includeNumberOfPortfolios"`
 }
